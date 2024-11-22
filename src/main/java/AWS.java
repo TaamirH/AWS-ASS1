@@ -3,17 +3,55 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.*;
+import java.util.Base64;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.pagination.sync.SdkIterable;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.ec2.Ec2Client;
-import software.amazon.awssdk.services.ec2.model.*;
+import software.amazon.awssdk.services.ec2.model.DescribeInstancesRequest;
+import software.amazon.awssdk.services.ec2.model.DescribeInstancesResponse;
+import software.amazon.awssdk.services.ec2.model.Filter;
+import software.amazon.awssdk.services.ec2.model.Instance;
+import software.amazon.awssdk.services.ec2.model.InstanceStateName;
+import software.amazon.awssdk.services.ec2.model.InstanceType;
+import software.amazon.awssdk.services.ec2.model.ResourceType;
+import software.amazon.awssdk.services.ec2.model.RunInstancesRequest;
+import software.amazon.awssdk.services.ec2.model.RunInstancesResponse;
+import software.amazon.awssdk.services.ec2.model.Tag;
+import software.amazon.awssdk.services.ec2.model.TagSpecification;
+import software.amazon.awssdk.services.ec2.model.TerminateInstancesRequest;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.*;
+import software.amazon.awssdk.services.s3.model.CreateBucketConfiguration;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
+import software.amazon.awssdk.services.s3.model.Delete;
+import software.amazon.awssdk.services.s3.model.DeleteBucketRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Object;
 import software.amazon.awssdk.services.s3.paginators.ListObjectsV2Iterable;
 import software.amazon.awssdk.services.sqs.SqsClient;
-import software.amazon.awssdk.services.sqs.model.*;
+import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
+import software.amazon.awssdk.services.sqs.model.CreateQueueResponse;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageRequest;
+import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
+import software.amazon.awssdk.services.sqs.model.GetQueueAttributesRequest;
+import software.amazon.awssdk.services.sqs.model.GetQueueAttributesResponse;
+import software.amazon.awssdk.services.sqs.model.GetQueueUrlRequest;
+import software.amazon.awssdk.services.sqs.model.Message;
+import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+
 
 
 public class AWS {
@@ -40,6 +78,7 @@ public class AWS {
 
         return instance;
     }
+    
 
 
 //////////////////////////////////////////  EC2
@@ -58,6 +97,49 @@ public class AWS {
         } catch (Exception ignored) {
         }
     }
+    
+    public void runManagerFromAMI(String ami, String tagKey, String tagValue){
+        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
+            .imageId(ami)
+            .instanceType(InstanceType.T2_MICRO)
+            .minCount(1)
+            .maxCount(1) // Launch only one Manager
+            .tagSpecifications(TagSpecification.builder()
+                    .resourceType(ResourceType.INSTANCE)
+                    .tags(Tag.builder()
+                            .key(tagKey)
+                            .value(tagValue)
+                            .build())
+                    .build())
+            .build();
+
+    // Launch the instance
+    try {
+        ec2.runInstances(runInstancesRequest);
+        System.out.println("Launched Manager instance with tag: " + tagKey + "=" + tagValue);
+    } catch (Exception e) {
+        throw new RuntimeException("Failed to launch instance: " + e.getMessage());
+    }
+    }
+
+    public void checkAndStartManager(String ami, String managerTagKey, String managerTagValue) {
+        // Check for existing manager instances
+        List<Instance> instances = getAllInstances();
+        boolean managerExists = instances.stream().anyMatch(instance -> 
+            instance.tags().stream().anyMatch(tag -> 
+                tag.key().equals(managerTagKey) && tag.value().equals(managerTagValue)
+            )
+            && instance.state().name().equals(InstanceStateName.RUNNING)
+        );
+    
+        if (!managerExists) {
+            // Start a new Manager instance
+            System.out.println("No Manager found. Starting a new Manager...");
+            runManagerFromAMI(ami, managerTagKey, managerTagValue);
+        } else {
+            System.out.println("Manager is already running.");
+        }
+    }
 
     public RunInstancesResponse runInstanceFromAmiWithScript(String ami, InstanceType instanceType, int min, int max, String script) {
         RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
@@ -67,6 +149,7 @@ public class AWS {
                 .maxCount(max)
                 .userData(Base64.getEncoder().encodeToString(script.getBytes()))
                 // @ADD security feratures
+                
                 .build();
 
         // Launch the instance
@@ -299,6 +382,52 @@ public class AWS {
                 Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_NOT_VISIBLE)) +
                 Integer.parseInt(attributes.get(QueueAttributeName.APPROXIMATE_NUMBER_OF_MESSAGES_DELAYED));
     }
+
+    public void sendMessageToQueue(String queueUrl, String messageBody, String appTag) {
+        try {
+            SendMessageRequest sendMessageRequest = SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(messageBody)
+                    .messageAttributes(Map.of(
+                        "AppTag", MessageAttributeValue.builder()
+                                .stringValue(appTag)
+                                .dataType("String")
+                                .build()
+                    ))
+                    .build();
+            sqs.sendMessage(sendMessageRequest);
+            System.out.println("Message sent to queue: " + queueUrl + " | Message: " + messageBody + " | AppTag: " + appTag);
+        } catch (Exception e) {
+            System.out.println("Failed to send message to queue: " + e.getMessage());
+        }
+    }
+
+    public List<Message> receiveMessages(String queueUrl) {
+    try {
+        ReceiveMessageRequest request = ReceiveMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .maxNumberOfMessages(10)
+                .waitTimeSeconds(5)
+                .build();
+        return sqs.receiveMessage(request).messages();
+    } catch (Exception e) {
+        System.out.println("Error receiving messages: " + e.getMessage());
+        return List.of();
+    }
+}
+
+public void deleteMessageFromQueue(String queueUrl, Message message) {
+    try {
+        DeleteMessageRequest request = DeleteMessageRequest.builder()
+                .queueUrl(queueUrl)
+                .receiptHandle(message.receiptHandle())
+                .build();
+        sqs.deleteMessage(request);
+        System.out.println("Deleted message: " + message.body());
+    } catch (Exception e) {
+        System.out.println("Error deleting message: " + e.getMessage());
+    }
+}
 
 
     ///////////////////////
