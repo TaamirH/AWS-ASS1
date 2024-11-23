@@ -63,12 +63,15 @@ public class AWS {
     private final Ec2Client ec2;
     private final String bucketName;
     private static AWS instance = null;
+    private static boolean acceptNewMessages;
+
 
     public AWS() {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region1).build();
         bucketName = "clilandtamil";
+        acceptNewMessages=true;
     }
 
     public static AWS getInstance() {
@@ -78,7 +81,13 @@ public class AWS {
 
         return instance;
     }
+    public void stopAcceptingNewMessages() {
+        acceptNewMessages = false;
+    }
     
+    public boolean isAcceptingNewMessages() {
+        return acceptNewMessages;
+    }
 
 
 //////////////////////////////////////////  EC2
@@ -159,6 +168,29 @@ public class AWS {
             throw new RuntimeException(e);
         }
         return null;
+    }
+
+    public void bootstrapWorkers(int numWorkers, String ami, String workerTag) {
+        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
+                .imageId(ami)
+                .instanceType(InstanceType.T2_MICRO)
+                .minCount(numWorkers)
+                .maxCount(numWorkers)
+                .tagSpecifications(TagSpecification.builder()
+                        .resourceType(ResourceType.INSTANCE)
+                        .tags(Tag.builder()
+                                .key("Role")
+                                .value(workerTag)
+                                .build())
+                        .build())
+                .build();
+    
+        try {
+            ec2.runInstances(runInstancesRequest);
+            System.out.println("Launched " + numWorkers + " worker instances.");
+        } catch (Exception e) {
+            System.err.println("Failed to bootstrap workers: " + e.getMessage());
+        }
     }
 
     public List<Instance> getAllInstances() {
