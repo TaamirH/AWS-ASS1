@@ -1,11 +1,15 @@
-import software.amazon.awssdk.services.sqs.model.*;
-import software.amazon.awssdk.services.ec2.model.Instance;
-import software.amazon.awssdk.services.ec2.model.InstanceStateName;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import software.amazon.awssdk.services.ec2.model.Instance;
+import software.amazon.awssdk.services.ec2.model.InstanceStateName;
+import software.amazon.awssdk.services.sqs.model.Message;
 public class Manager {
     private static final int MAX_INSTANCES = 10;
     private static final int MESSAGES_PER_WORKER = 100;
@@ -64,7 +68,7 @@ public class Manager {
                 }
             }
 
-            // Optionally send response messages to the Local App
+            // TODO
             //sendResponseMessages();
 
             // Terminate the Manager process
@@ -84,8 +88,8 @@ public class Manager {
                 String[] parts = line.split(",");
                 if (parts.length != 2) continue;
     
-                String url = parts[0].trim();
-                String operation = parts[1].trim();
+                String operation = parts[0].trim();
+                String url = parts[1].trim();
     
                 // Create and send a task message to the worker queue
                 String taskMessage = "URL: " + url + ", Operation: " + operation;
