@@ -1,27 +1,39 @@
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.rendering.PDFRenderer;
-import org.apache.pdfbox.text.PDFTextStripper;
-import software.amazon.awssdk.services.sqs.model.Message;
-
-import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+
 import javax.imageio.ImageIO;
+import java.io.BufferedReader;
+import java.awt.image.BufferedImage;
+import java.io.FileReader;
 
-public class Worker {
 
-    private static final String OUTPUT_BUCKET = "processed-pdfs-bucket";
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.PDFRenderer;
+import org.apache.pdfbox.text.PDFTextStripper;
 
-    public static void main(String[] args) {
-        AWS aws = AWS.getInstance();
-        String workerQueueUrl = aws.getQueueUrl("ManagerToWorkerSQS");
-        String resultQueueUrl = aws.createQueue("WorkerToManagerSQS");
+import software.amazon.awssdk.services.sqs.model.Message;
 
+public class WorkerThread extends Thread {
+    private final AWS aws;
+    private final String managerToWorkerQueueUrl;
+    
+
+    public WorkerThread(AWS aws, String managerToWorkerQueueUrl) {
+        this.aws = aws;
+        this.managerToWorkerQueueUrl = managerToWorkerQueueUrl;
+    }
+
+    @Override
+    public void run() {
         while (true) {
-            List<Message> messages = aws.receiveMessages(workerQueueUrl);
-
+            List<Message> messages = aws.receiveMessages(managerToWorkerQueueUrl);
+            String resultQueueUrl = aws.createQueue("WorkerToManagerSQS");
             for (Message message : messages) {
                 try {
                     // Extract details from the message
@@ -30,12 +42,10 @@ public class Worker {
                         throw new IllegalArgumentException("Invalid message format: " + message.body());
                     }
                     String operation = parts[0].trim(); // Operation (ToImage, ToHTML, ToText)
-                    String s3Url = parts[1].trim(); // S3 URL of the input PDF
+                    String fileUrl = parts[1].trim(); // S3 URL of the input PDF
 
                     // Download the PDF from S3
-                    String pdfKey = s3Url.replace("s3://" + OUTPUT_BUCKET + "/", "");
-                    File pdfFile = new File("input.pdf");
-                    aws.downloadFileFromS3(pdfKey, pdfFile);
+                    File pdfFile = downloadFileFromInternet(fileUrl, operation);
 
                     // Perform the requested operation
                     File outputFile = null;
@@ -49,7 +59,7 @@ public class Worker {
 
                         // Success message
                         resultMessage = String.format(
-                            "%s: Original: %s, Output: %s", operation, s3Url, outputS3Url
+                            "%s: Original: %s, Output: %s", operation, fileUrl, outputS3Url
                         );
                     } catch (Exception operationException) {
                         // Operation-specific error
@@ -62,7 +72,7 @@ public class Worker {
                     aws.sendMessageToQueue(resultQueueUrl, resultMessage, "WorkerTag");
 
                     // Remove the processed message from the queue
-                    aws.deleteMessageFromQueue(workerQueueUrl, message);
+                    aws.deleteMessageFromQueue(managerToWorkerQueueUrl, message);
 
                 } catch (Exception e) {
                     // General error handling (e.g., S3 file not available)
@@ -70,7 +80,6 @@ public class Worker {
                         "Error: %s: input file %s", message.body(), e.getMessage()
                     );
                     aws.sendMessageToQueue(resultQueueUrl, errorMessage, "WorkerTag");
-                    aws.deleteMessageFromQueue(workerQueueUrl, message);
                 }
             }
 
@@ -82,7 +91,7 @@ public class Worker {
             }
         }
     }
-
+    
     private static File performOperation(File pdfFile, String operation) throws IOException {
         File outputFile;
 
@@ -111,7 +120,6 @@ public class Worker {
     private static File convertToImage(PDDocument document) throws IOException {
         PDFRenderer renderer = new PDFRenderer(document);
         BufferedImage image = renderer.renderImageWithDPI(0, 300); // Convert the first page at 300 DPI
-
         File imageFile = new File("output.png");
         ImageIO.write(image, "png", imageFile);
 
@@ -140,4 +148,15 @@ public class Worker {
 
         return textFile;
     }
+
+    private File downloadFileFromInternet(String fileUrl, String operation) throws IOException {
+    @SuppressWarnings("deprecation")
+    URL url = new URL(fileUrl);
+    File downloadedFile = new File(fileUrl + "-" + operation); // Save as "downloaded.pdf"
+    try (InputStream inputStream = url.openStream()) { // Explicit type InputStream
+        Files.copy(inputStream, downloadedFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+    }
+    System.out.println("File downloaded: " + downloadedFile.getAbsolutePath());
+    return downloadedFile;
+}
 }

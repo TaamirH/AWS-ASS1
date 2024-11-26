@@ -440,6 +440,7 @@ public class AWS {
                 .queueUrl(queueUrl)
                 .maxNumberOfMessages(10)
                 .waitTimeSeconds(5)
+                .messageAttributeNames("All")
                 .build();
         return sqs.receiveMessage(request).messages();
     } catch (Exception e) {
