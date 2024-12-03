@@ -1,4 +1,4 @@
-ToImage	http://www.jewishfederations.org/local_includes/downloads/39497.pdf
+ToImage http://www.jewishfederations.org/local_includes/downloads/39497.pdf
 ToHTML	http://www.st.tees.org.uk/assets/Downloads/Passover-service.pdf
 ToText	http://www.chabad.org/media/pdf/42/kUgi423322.pdf
 ToImage	http://www.bethelnewton.org/images/Passover_Guide_BOOKLET.pdf

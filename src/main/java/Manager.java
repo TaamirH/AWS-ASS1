@@ -13,7 +13,7 @@ import software.amazon.awssdk.services.sqs.model.Message;
 public class Manager {
     private static final int MAX_INSTANCES = 10;
     private static final int MESSAGES_PER_WORKER = 100;
-    private static final int THREAD_POOL_SIZE = 10; 
+    private static final int THREAD_POOL_SIZE = 5; 
 
 
 

@@ -3,7 +3,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
-import java.net.URL;
+import java.io.*;
+import java.net.*;
+import java.nio.file.*;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
@@ -22,28 +24,33 @@ import software.amazon.awssdk.services.sqs.model.Message;
 public class WorkerThread extends Thread {
     private final AWS aws;
     private final String managerToWorkerQueueUrl;
-    
+    private final String workerToManagerQueueUrl;
 
-    public WorkerThread(AWS aws, String managerToWorkerQueueUrl) {
+    public WorkerThread(AWS aws, String managerToWorkerQueueUrl, String workerToManagerQueueUrl) {
         this.aws = aws;
         this.managerToWorkerQueueUrl = managerToWorkerQueueUrl;
+        this.workerToManagerQueueUrl = workerToManagerQueueUrl;
     }
 
     @Override
     public void run() {
+        
         while (true) {
             List<Message> messages = aws.receiveMessages(managerToWorkerQueueUrl);
-            String resultQueueUrl = aws.createQueue("WorkerToManagerSQS");
+            
+            
             for (Message message : messages) {
+                String appTag = message.messageAttributes().get("AppTag").stringValue();
                 try {
                     // Extract details from the message
-                    String[] parts = message.body().split("\t");
+                    String[] parts = parseInputLine(message.body());
+                    
                     if (parts.length != 2) {
                         throw new IllegalArgumentException("Invalid message format: " + message.body());
                     }
                     String operation = parts[0].trim(); // Operation (ToImage, ToHTML, ToText)
                     String fileUrl = parts[1].trim(); // S3 URL of the input PDF
-
+                   
                     // Download the PDF from S3
                     File pdfFile = downloadFileFromInternet(fileUrl, operation);
 
@@ -59,7 +66,7 @@ public class WorkerThread extends Thread {
 
                         // Success message
                         resultMessage = String.format(
-                            "%s: Original: %s, Output: %s", operation, fileUrl, outputS3Url
+                            "%s: to file: Original: %s, Output in s3: %s", operation, fileUrl, outputS3Url
                         );
                     } catch (Exception operationException) {
                         // Operation-specific error
@@ -69,7 +76,7 @@ public class WorkerThread extends Thread {
                     }
 
                     // Send a result message (success or error)
-                    aws.sendMessageToQueue(resultQueueUrl, resultMessage, "WorkerTag");
+                    aws.sendMessageToQueue(workerToManagerQueueUrl, resultMessage, appTag);
 
                     // Remove the processed message from the queue
                     aws.deleteMessageFromQueue(managerToWorkerQueueUrl, message);
@@ -79,13 +86,14 @@ public class WorkerThread extends Thread {
                     String errorMessage = String.format(
                         "Error: %s: input file %s", message.body(), e.getMessage()
                     );
-                    aws.sendMessageToQueue(resultQueueUrl, errorMessage, "WorkerTag");
+                    aws.sendMessageToQueue(workerToManagerQueueUrl, errorMessage, appTag);
+                     // Remove the processed message from the queue
+                    aws.deleteMessageFromQueue(managerToWorkerQueueUrl, message);
                 }
             }
 
-            // Sleep briefly before polling again to avoid excessive API calls
             try {
-                Thread.sleep(5000);
+                Thread.sleep(50);
             } catch (InterruptedException e) {
                 System.err.println("Worker interrupted: " + e.getMessage());
             }
@@ -94,19 +102,19 @@ public class WorkerThread extends Thread {
     
     private static File performOperation(File pdfFile, String operation) throws IOException {
         File outputFile;
-
+        String name = pdfFile.getName();
         try (PDDocument document = PDDocument.load(pdfFile)) {
             switch (operation.toLowerCase()) {
                 case "toimage":
-                    outputFile = convertToImage(document);
+                    outputFile = convertToImage(document, name);
                     break;
 
                 case "tohtml":
-                    outputFile = convertToHTML(document);
+                    outputFile = convertToHTML(document, name);
                     break;
 
                 case "totext":
-                    outputFile = convertToText(document);
+                    outputFile = convertToText(document, name);
                     break;
 
                 default:
@@ -117,20 +125,21 @@ public class WorkerThread extends Thread {
         return outputFile;
     }
 
-    private static File convertToImage(PDDocument document) throws IOException {
+    private static File convertToImage(PDDocument document, String name) throws IOException {
+        
         PDFRenderer renderer = new PDFRenderer(document);
-        BufferedImage image = renderer.renderImageWithDPI(0, 300); // Convert the first page at 300 DPI
-        File imageFile = new File("output.png");
+        BufferedImage image = renderer.renderImageWithDPI(0, 300); 
+        File imageFile = new File(name.replace(".pdf", ".png"));
         ImageIO.write(image, "png", imageFile);
 
         return imageFile;
     }
 
-    private static File convertToHTML(PDDocument document) throws IOException {
+    private static File convertToHTML(PDDocument document, String name) throws IOException {
         String text = new PDFTextStripper().getText(document);
         String htmlContent = "<html><body>" + text.replace("\n", "<br>") + "</body></html>";
 
-        File htmlFile = new File("output.html");
+        File htmlFile = new File(name.replace(".pdf", ".html"));
         try (FileWriter writer = new FileWriter(htmlFile)) {
             writer.write(htmlContent);
         }
@@ -138,10 +147,10 @@ public class WorkerThread extends Thread {
         return htmlFile;
     }
 
-    private static File convertToText(PDDocument document) throws IOException {
+    private static File convertToText(PDDocument document, String name) throws IOException {
         String text = new PDFTextStripper().getText(document);
 
-        File textFile = new File("output.txt");
+        File textFile = new File(name.replace(".pdf", ".txt"));
         try (FileWriter writer = new FileWriter(textFile)) {
             writer.write(text);
         }
@@ -149,14 +158,48 @@ public class WorkerThread extends Thread {
         return textFile;
     }
 
-    private File downloadFileFromInternet(String fileUrl, String operation) throws IOException {
+    public File downloadFileFromInternet(String fileUrl, String operation) throws IOException {
     @SuppressWarnings("deprecation")
     URL url = new URL(fileUrl);
-    File downloadedFile = new File(fileUrl + "-" + operation); // Save as "downloaded.pdf"
-    try (InputStream inputStream = url.openStream()) { // Explicit type InputStream
+    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+    connection.setInstanceFollowRedirects(false); // Disable auto-follow
+
+    // Handle redirect
+    int responseCode = connection.getResponseCode();
+    if (responseCode == HttpURLConnection.HTTP_MOVED_PERM || responseCode == HttpURLConnection.HTTP_MOVED_TEMP) {
+        String newUrl = connection.getHeaderField("Location");
+        System.out.println("Redirected to: " + newUrl);
+        url = new URL(newUrl); // Update URL to the redirected location
+        connection = (HttpURLConnection) url.openConnection();
+    }
+
+    // Extract the original file name from the URL
+    String originalFileName = new File(url.getPath()).getName();
+
+    File downloadedFile = new File(originalFileName);
+
+    // Download the file
+    try (InputStream inputStream = connection.getInputStream()) {
         Files.copy(inputStream, downloadedFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
     }
+
     System.out.println("File downloaded: " + downloadedFile.getAbsolutePath());
     return downloadedFile;
 }
+public static String[] parseInputLine(String inputLine) {
+    // Trim and normalize whitespace (replace tabs, multiple spaces with a single space)
+    String normalizedLine = inputLine.trim().replaceAll("\\s+", " ");
+    String[] error = new String[0];
+    // Split into parts (expecting exactly two parts: command and URL)
+    String[] parts = normalizedLine.split(" ", 2); // Split into at most 2 parts
+
+    // Ensure we have both parts
+    if (parts.length == 2) {
+        return parts;
+    }
+
+    return error; // Invalid input line
+}
+
+    
 }

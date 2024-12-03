@@ -70,7 +70,7 @@ public class AWS {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region1).build();
-        bucketName = "clilandtamil";
+        bucketName = "clilandtami";
         acceptNewMessages=true;
     }
 
