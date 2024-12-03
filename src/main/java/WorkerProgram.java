@@ -1,16 +1,15 @@
+import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.List;
-import java.io.*;
-import java.net.*;
-import java.nio.file.*;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
 
 import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
@@ -196,13 +195,13 @@ public class WorkerProgram {
     }
 
     public static void main(String[] args) {
-        if (args.length < 2) {
-            System.err.println("Usage: java WorkerProgram managerToWorkerQueueUrl workerToManagerQueueUrl");
-            return;
-        }
+        // if (args.length < 2) {
+        //     System.err.println("Usage: java WorkerProgram managerToWorkerQueueUrl workerToManagerQueueUrl");
+        //     return;
+        // }
 
-        String managerToWorkerQueueUrl = args[0];
-        String workerToManagerQueueUrl = args[1];
+        String managerToWorkerQueueUrl ="https://sqs.us-west-2.amazonaws.com/544427556982/ManagerToWorkerSQS";
+        String workerToManagerQueueUrl = "https://sqs.us-west-2.amazonaws.com/544427556982/WorkerToManagerSQS";
 
         AWS aws = AWS.getInstance(); // Ensure AWS instance is initialized
         WorkerProgram workerProgram = new WorkerProgram(aws, managerToWorkerQueueUrl, workerToManagerQueueUrl);

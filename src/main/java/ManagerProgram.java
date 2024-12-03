@@ -1,13 +1,22 @@
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
+import software.amazon.awssdk.services.ec2.model.Instance;
+import software.amazon.awssdk.services.ec2.model.InstanceStateName;
 import software.amazon.awssdk.services.sqs.model.Message;
 
 public class ManagerProgram {
+    private static final int MAX_INSTANCES = 10;
+    private static final int THREAD_POOL_SIZE = 5; 
     private final AWS aws;
     private final String appToManagerQueueUrl;
     private final String managerToWorkerQueueUrl;
@@ -24,7 +33,7 @@ public class ManagerProgram {
         this.managerToWorkerQueueUrl = aws.createQueue("ManagerToWorkerSQS");
         this.workerResultQueueUrl = aws.createQueue("WorkerToManagerSQS");
         this.managerToAppQueueUrl = managerToAppQueueUrl;
-        this.executorService = Executors.newFixedThreadPool(4); // Adjust threads for message processing
+        this.executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE); // Adjust threads for message processing
         this.queueFileCountMap = new ConcurrentHashMap<>();
         this.appTagResultFiles = new ConcurrentHashMap<>();
     }
@@ -40,13 +49,14 @@ public class ManagerProgram {
         });
         resultProcessorThread.start();
 
-        while (true) {
+        while (aws.isAcceptingNewMessages()) {
             try {
                 // Poll for messages from AppToManagerSQS
                 List<Message> messages = aws.receiveMessages(appToManagerQueueUrl);
 
                 for (Message message : messages) {
                     System.out.println("Manager processing message: " + message.body());
+                    if (message.body().contains("Terminate:True")) aws.stopAcceptingNewMessages();
                     executorService.submit(() -> processMessage(message));
                 }
 
@@ -57,14 +67,80 @@ public class ManagerProgram {
         }
     }
 
+    private static void bootstrapWorkers(AWS aws, String workerAmi, String workerTag,int n) throws InterruptedException {
+        String queueUrl = aws.getQueueUrl("ManagerToWorkerSQS");
+        int queueSize = aws.getQueueSize(queueUrl);
+        int requiredWorkers = (int) Math.ceil((double) queueSize / n);
+    
+        // Get active worker instances
+        List<Instance> workers = aws.getAllInstancesWithLabel(AWS.Label.Worker);
+    
+        int activeWorkers = (int) workers.stream()
+            .filter(instance -> instance.state().name().equals(InstanceStateName.RUNNING))
+            .count();
+    
+        // Determine how many workers to launch
+        int workersToLaunch = Math.min(MAX_INSTANCES - activeWorkers, Math.max(0, requiredWorkers - activeWorkers));
+    
+        if (workersToLaunch > 0) {
+            System.out.printf("Launching %d new workers...%n", workersToLaunch);
+            aws.bootstrapWorkers(workersToLaunch, workerAmi, workerTag);
+        } else {
+            System.out.println("No additional workers needed.");
+        }
+    }
+
+    
+    private static void handleTermination(AWS aws, String managerToWorkerQueueUrl, ExecutorService threadPool) {
+        System.out.println("Termination signal received. Shutting down...");
+
+
+        try {
+            // Wait for workers to finish processing the queue
+            while (aws.getQueueSize(managerToWorkerQueueUrl) > 0) {
+                System.out.println("Waiting for workers to finish...");
+                Thread.sleep(5000);
+            }
+
+            // Shutdown thread pool
+            threadPool.shutdown();
+            threadPool.awaitTermination(60, TimeUnit.SECONDS);
+
+            // Terminate all worker instances
+            List<Instance> workers = aws.getAllInstancesWithLabel(AWS.Label.Worker);
+            for (Instance worker : workers) {
+                if (worker.state().name().equals(InstanceStateName.RUNNING)) {
+                    System.out.println("Terminating worker instance: " + worker.instanceId());
+                    aws.terminateInstance(worker.instanceId());
+                }
+            }
+
+            // Terminate the Manager process
+            List<Instance> manager = aws.getAllInstancesWithLabel(AWS.Label.Manager);
+            aws.terminateInstance(manager.getFirst().instanceId());
+            System.out.println("Manager shutting down.");
+            System.exit(0);
+
+        } catch (Exception e) {
+            System.err.println("Error during termination: " + e.getMessage());
+        }
+    }
+
     private void processMessage(Message message) {
         try {
             String appTag = message.messageAttributes().get("AppTag").stringValue();
             System.out.println("Processing message with AppTag: " + appTag);
 
             // Parse S3 file URL from the message
-            String s3FileUrl = message.body().replace("File uploaded to S3: ", "");
-            String s3FileName = s3FileUrl.replace("s3://clilandtami/", "");
+            String[] parts = message.body().split(",");
+            if (parts.length != 3){
+                //return error to sqs
+                return;
+            }
+
+            String s3FileUrl = parts[0].replace("File uploaded to S3:", "");
+            String s3FileName = s3FileUrl.replace("s3://clilandtamil/", "");
+            int n = Integer.valueOf(parts[1].replace("N:",""));
 
             // Download the input file
             File inputFile = new File(s3FileName);
@@ -74,7 +150,7 @@ public class ManagerProgram {
             prepareResultFile(appTag);
 
             // Process the input file and update queueFileCountMap
-            processInputFile(inputFile, appTag);
+            processInputFile(inputFile, appTag, n);
 
             // Delete the processed message from the queue
             aws.deleteMessageFromQueue(appToManagerQueueUrl, message);
@@ -84,18 +160,18 @@ public class ManagerProgram {
         }
     }
 
-    private void processInputFile(File inputFile, String appTag) {
+    private void processInputFile(File inputFile, String appTag, int n) {
         try {
             List<String> lines = Files.readAllLines(Paths.get(inputFile.toURI()));
             int lineCount = lines.size();
-
+            bootstrapWorkers(aws, aws.IMAGE_AMI, "Worker", lineCount / n);
             queueFileCountMap.put(appTag, lineCount);
 
             for (String line : lines) {
                 aws.sendMessageToQueue(managerToWorkerQueueUrl, line, appTag);
                 System.out.println("Created task message: " + line);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.err.println("Error reading input file: " + e.getMessage());
         }
     }
@@ -135,14 +211,14 @@ public class ManagerProgram {
                         }
 
                         aws.deleteMessageFromQueue(workerResultQueueUrl, workerMessage);
-
+                        if (!queueFileCountMap.keys().hasMoreElements()) handleTermination(aws, managerToWorkerQueueUrl, executorService);
                     } catch (IOException e) {
                         System.err.println("Error writing worker result: " + e.getMessage());
                     }
                 }
 
                 Thread.sleep(5000); // Polling delay
-
+                
             } catch (InterruptedException e) {
                 System.err.println("Error processing worker results: " + e.getMessage());
             }
@@ -173,13 +249,10 @@ public class ManagerProgram {
     }
 
     public static void main(String[] args) {
-        if (args.length < 2) {
-            System.err.println("Usage: java ManagerProgram appToManagerQueueUrl managerToWorkerQueueUrl workerResultQueueUrl managerToAppQueueUrl");
-            return;
-        }
 
-        String appToManagerQueueUrl = args[0];
-        String managerToAppQueueUrl = args[1];
+
+        String appToManagerQueueUrl = "https://sqs.us-west-2.amazonaws.com/544427556982/AppToManagerSQS";
+        String managerToAppQueueUrl = "https://sqs.us-west-2.amazonaws.com/544427556982/ManagerToAppSQS";
 
         ManagerProgram manager = new ManagerProgram(appToManagerQueueUrl, managerToAppQueueUrl);
         manager.run();

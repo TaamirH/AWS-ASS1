@@ -1,7 +1,11 @@
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
+
 import software.amazon.awssdk.services.sqs.model.Message;
 
 public class LocalApp {
@@ -9,15 +13,16 @@ public class LocalApp {
         AWS aws = AWS.getInstance();
         String appToManagerQueueUrl = aws.createQueue("AppToManagerSQS");
         String ManagerToAppQueueUrl = aws.createQueue("ManagerToAppSQS");
+        aws.checkAndStartManager("ami-08902199a8aa0bc09", "Role", "Manager");
         try {
             // Upload a file to S3
             String inputFileName = "input-sample-3.txt";
-            File inputFile = new File("C:\\Users\\clila\\AWS-ASS1\\" + inputFileName);
+            File inputFile = new File("C:\\New folder\\DPL\\ASS1\\AWS-Exp\\" + inputFileName);
             String s3Url = aws.uploadFileToS3(inputFileName, inputFile);
 
             // Send a message to Manager
             String appTag = "LocalApp1 " + inputFileName;
-            String taskMessage = "File uploaded to S3: " + s3Url;
+            String taskMessage = "File uploaded to S3:" + s3Url+"," + "N:100,Terminate:True";
             aws.sendMessageToQueue(appToManagerQueueUrl, taskMessage, appTag);
 
             System.out.println("Message sent to AppToManagerSQS: " + taskMessage);

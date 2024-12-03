@@ -57,7 +57,7 @@ import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 public class AWS {
 
     public final String IMAGE_AMI = "ami-08902199a8aa0bc09";
-    public Region region1 = Region.US_WEST_2;
+    public Region region1 = Region.US_EAST_1;
     private final S3Client s3;
     private final SqsClient sqs;
     private final Ec2Client ec2;
@@ -70,7 +70,7 @@ public class AWS {
         s3 = S3Client.builder().region(region1).build();
         sqs = SqsClient.builder().region(region1).build();
         ec2 = Ec2Client.builder().region(region1).build();
-        bucketName = "clilandtami";
+        bucketName = "clilandtamy";
         acceptNewMessages=true;
     }
 
