@@ -7,8 +7,8 @@ import software.amazon.awssdk.services.sqs.model.Message;
 public class LocalApp {
     public static void main(String[] args) {
         AWS aws = AWS.getInstance();
-        String appToManagerQueueUrl = aws.getQueueUrl("AppToManagerSQS");
-        String ManagerToAppQueueUrl = aws.getQueueUrl("ManagerToAppSQS");
+        String appToManagerQueueUrl = aws.createQueue("AppToManagerSQS");
+        String ManagerToAppQueueUrl = aws.createQueue("ManagerToAppSQS");
         try {
             // Upload a file to S3
             String inputFileName = "input-sample-3.txt";
