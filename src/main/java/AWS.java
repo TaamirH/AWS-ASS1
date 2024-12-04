@@ -109,14 +109,20 @@ public class AWS {
     
     public void runManagerFromAMI(String ami, String tagKey, String tagValue) {
         String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://"+bucketName+"/manager.jar"; // Replace with your S3 JAR path
+        String s3JarPath = "s3://" + bucketName + "/manager.jar"; // Replace with your S3 JAR path
         String managerJarFileName = "manager.jar";
         String command = String.format(
             "#!/bin/bash\n" +
-            "yum update -y\n" +
-            "yum install -y java-11-amazon-corretto\n" +
-            "aws s3 cp %s /home/ec2-user/%s\n" +
-            "java -jar /home/ec2-user/%s",
+            "if ! command -v java &> /dev/null\n" + // Check if Java is installed
+            "then\n" +
+            "  echo 'Java not found. Installing JDK 17...'\n" +
+            "  yum update -y\n" +
+            "  yum install -y java-17-amazon-corretto\n" + // Install JDK 17
+            "else\n" +
+            "  echo 'Java is already installed.'\n" +
+            "fi\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" + // Download JAR from S3
+            "java -jar /home/ec2-user/%s", // Run the JAR
             s3JarPath, managerJarFileName, managerJarFileName
         );
     
@@ -144,6 +150,7 @@ public class AWS {
             throw new RuntimeException("Failed to launch instance: " + e.getMessage());
         }
     }
+    
     
 
     public void checkAndStartManager(String ami, String managerTagKey, String managerTagValue) {
@@ -187,14 +194,20 @@ public class AWS {
 
     public void bootstrapWorkers(int numWorkers, String ami, String workerTag) {
         String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://"+bucketName+"/worker.jar"; // Replace with your S3 JAR path
+        String s3JarPath = "s3://" + bucketName + "/worker.jar"; // Replace with your S3 JAR path
         String jarFileName = "worker.jar";
         String command = String.format(
             "#!/bin/bash\n" +
-            "yum update -y\n" +
-            "yum install -y java-11-amazon-corretto\n" +
-            "aws s3 cp %s /home/ec2-user/%s\n" +
-            "java -jar /home/ec2-user/%s",
+            "if ! command -v java &> /dev/null\n" + // Check if Java is installed
+            "then\n" +
+            "  echo 'Java not found. Installing JDK 17...'\n" +
+            "  yum update -y\n" +
+            "  yum install -y java-17-amazon-corretto\n" + // Install JDK 17
+            "else\n" +
+            "  echo 'Java is already installed.'\n" +
+            "fi\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" + // Download JAR from S3
+            "java -jar /home/ec2-user/%s", // Run the JAR
             s3JarPath, jarFileName, jarFileName
         );
     
@@ -222,6 +235,7 @@ public class AWS {
             System.err.println("Failed to bootstrap workers: " + e.getMessage());
         }
     }
+    
 
     public List<Instance> getAllInstances() {
         DescribeInstancesRequest describeInstancesRequest = DescribeInstancesRequest.builder().build();
