@@ -107,12 +107,26 @@ public class AWS {
         }
     }
     
-    public void runManagerFromAMI(String ami, String tagKey, String tagValue){
+    public void runManagerFromAMI(String ami, String tagKey, String tagValue) {
+        String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
+        String s3JarPath = "s3://your-bucket-name/your-jar-file.jar"; // Replace with your S3 JAR path
+        String managerJarFileName = "your-jar-file.jar";
+        String command = String.format(
+            "#!/bin/bash\n" +
+            "yum update -y\n" +
+            "yum install -y java-11-amazon-corretto\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" +
+            "java -jar /home/ec2-user/%s",
+            s3JarPath, managerJarFileName, managerJarFileName
+        );
+    
         RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
             .imageId(ami)
             .instanceType(InstanceType.T2_MICRO)
+            .iamInstanceProfile(builder -> builder.name(instanceProfileName))
             .minCount(1)
-            .maxCount(1) // Launch only one Manager
+            .maxCount(1)
+            .userData(Base64.getEncoder().encodeToString(command.getBytes())) // Provide the user data script
             .tagSpecifications(TagSpecification.builder()
                     .resourceType(ResourceType.INSTANCE)
                     .tags(Tag.builder()
@@ -121,15 +135,16 @@ public class AWS {
                             .build())
                     .build())
             .build();
-
-    // Launch the instance
-    try {
-        ec2.runInstances(runInstancesRequest);
-        System.out.println("Launched Manager instance with tag: " + tagKey + "=" + tagValue);
-    } catch (Exception e) {
-        throw new RuntimeException("Failed to launch instance: " + e.getMessage());
+    
+        // Launch the instance
+        try {
+            ec2.runInstances(runInstancesRequest);
+            System.out.println("Launched Manager instance with tag: " + tagKey + "=" + tagValue);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to launch instance: " + e.getMessage());
+        }
     }
-    }
+    
 
     public void checkAndStartManager(String ami, String managerTagKey, String managerTagValue) {
         // Check for existing manager instances
@@ -171,23 +186,38 @@ public class AWS {
     }
 
     public void bootstrapWorkers(int numWorkers, String ami, String workerTag) {
-        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
-                .imageId(ami)
-                .instanceType(InstanceType.T2_MICRO)
-                .minCount(numWorkers)
-                .maxCount(numWorkers)
-                .tagSpecifications(TagSpecification.builder()
-                        .resourceType(ResourceType.INSTANCE)
-                        .tags(Tag.builder()
-                                .key("Role")
-                                .value(workerTag)
-                                .build())
-                        .build())
-                .build();
+        String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
+        String s3JarPath = "s3://your-bucket-name/worker-jar-file.jar"; // Replace with your S3 JAR path
+        String jarFileName = "worker-jar-file.jar";
+        String command = String.format(
+            "#!/bin/bash\n" +
+            "yum update -y\n" +
+            "yum install -y java-11-amazon-corretto\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" +
+            "java -jar /home/ec2-user/%s",
+            s3JarPath, jarFileName, jarFileName
+        );
     
+        RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
+            .imageId(ami)
+            .instanceType(InstanceType.T2_MICRO)
+            .iamInstanceProfile(builder -> builder.name(instanceProfileName)) // Attach IAM role
+            .minCount(numWorkers)
+            .maxCount(numWorkers)
+            .userData(Base64.getEncoder().encodeToString(command.getBytes())) // Provide the user data script
+            .tagSpecifications(TagSpecification.builder()
+                    .resourceType(ResourceType.INSTANCE)
+                    .tags(Tag.builder()
+                            .key("Role")
+                            .value(workerTag)
+                            .build())
+                    .build())
+            .build();
+    
+        // Launch the worker instances
         try {
             ec2.runInstances(runInstancesRequest);
-            System.out.println("Launched " + numWorkers + " worker instances.");
+            System.out.println("Launched " + numWorkers + " worker instances with tag: " + workerTag);
         } catch (Exception e) {
             System.err.println("Failed to bootstrap workers: " + e.getMessage());
         }

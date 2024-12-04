@@ -117,7 +117,7 @@ public class ManagerProgram {
 
             // Terminate the Manager process
             List<Instance> manager = aws.getAllInstancesWithLabel(AWS.Label.Manager);
-            aws.terminateInstance(manager.getFirst().instanceId());
+            aws.terminateInstance(manager.get(0).instanceId());
             System.out.println("Manager shutting down.");
             System.exit(0);
 
