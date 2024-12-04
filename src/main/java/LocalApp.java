@@ -41,8 +41,7 @@ public class LocalApp {
                             System.out.println("Received result message: " + resultMessage);
 
                             // Extract S3 URL for the result file
-                            String resultFileUrl = resultMessage.replace("Results ready at: ", "");
-                            String resultFileName = "results.txt";
+                            String resultFileName = "results-"+inputFileName+"+txt";
 
                             // Download the result file
                             File resultFile = new File(resultFileName);

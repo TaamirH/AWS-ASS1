@@ -108,21 +108,15 @@ public class AWS {
     }
     
     public void runManagerFromAMI(String ami, String tagKey, String tagValue) {
-        String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://" + bucketName + "/manager.jar"; // Replace with your S3 JAR path
+        String instanceProfileName = "LabInstanceProfile"; 
+        String s3JarPath = "s3://" + bucketName + "/manager.jar"; 
         String managerJarFileName = "manager.jar";
         String command = String.format(
             "#!/bin/bash\n" +
-            "if ! command -v java &> /dev/null\n" + // Check if Java is installed
-            "then\n" +
-            "  echo 'Java not found. Installing JDK 17...'\n" +
-            "  yum update -y\n" +
-            "  yum install -y java-17-amazon-corretto\n" + // Install JDK 17
-            "else\n" +
-            "  echo 'Java is already installed.'\n" +
-            "fi\n" +
-            "aws s3 cp %s /home/ec2-user/%s\n" + // Download JAR from S3
-            "java -jar /home/ec2-user/%s", // Run the JAR
+            "sudo yum update -y\n" +
+            "sudo yum install -y java-17-amazon-corretto\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" +
+            "java -jar /home/ec2-user/%s",
             s3JarPath, managerJarFileName, managerJarFileName
         );
     
@@ -193,31 +187,25 @@ public class AWS {
     }
 
     public void bootstrapWorkers(int numWorkers, String ami, String workerTag) {
-        String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://" + bucketName + "/worker.jar"; // Replace with your S3 JAR path
+        String instanceProfileName = "LabInstanceProfile"; 
+        String s3JarPath = "s3://" + bucketName + "/worker.jar"; 
         String jarFileName = "worker.jar";
-        String command = String.format(
+       String command = String.format(
             "#!/bin/bash\n" +
-            "if ! command -v java &> /dev/null\n" + // Check if Java is installed
-            "then\n" +
-            "  echo 'Java not found. Installing JDK 17...'\n" +
-            "  yum update -y\n" +
-            "  yum install -y java-17-amazon-corretto\n" + // Install JDK 17
-            "else\n" +
-            "  echo 'Java is already installed.'\n" +
-            "fi\n" +
-            "aws s3 cp %s /home/ec2-user/%s\n" + // Download JAR from S3
-            "java -jar /home/ec2-user/%s", // Run the JAR
+            "sudo yum update -y\n" +
+            "sudo yum install -y java-17-amazon-corretto\n" +
+            "aws s3 cp %s /home/ec2-user/%s\n" + 
+            "java -jar /home/ec2-user/%s", 
             s3JarPath, jarFileName, jarFileName
         );
     
         RunInstancesRequest runInstancesRequest = RunInstancesRequest.builder()
             .imageId(ami)
             .instanceType(InstanceType.T2_MICRO)
-            .iamInstanceProfile(builder -> builder.name(instanceProfileName)) // Attach IAM role
+            .iamInstanceProfile(builder -> builder.name(instanceProfileName)) 
             .minCount(numWorkers)
             .maxCount(numWorkers)
-            .userData(Base64.getEncoder().encodeToString(command.getBytes())) // Provide the user data script
+            .userData(Base64.getEncoder().encodeToString(command.getBytes())) 
             .tagSpecifications(TagSpecification.builder()
                     .resourceType(ResourceType.INSTANCE)
                     .tags(Tag.builder()
