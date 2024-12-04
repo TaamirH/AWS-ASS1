@@ -109,8 +109,8 @@ public class AWS {
     
     public void runManagerFromAMI(String ami, String tagKey, String tagValue) {
         String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://your-bucket-name/your-jar-file.jar"; // Replace with your S3 JAR path
-        String managerJarFileName = "your-jar-file.jar";
+        String s3JarPath = "s3://"+bucketName+"/manager.jar"; // Replace with your S3 JAR path
+        String managerJarFileName = "manager.jar";
         String command = String.format(
             "#!/bin/bash\n" +
             "yum update -y\n" +
@@ -187,8 +187,8 @@ public class AWS {
 
     public void bootstrapWorkers(int numWorkers, String ami, String workerTag) {
         String instanceProfileName = "LabInstanceProfile"; // Replace with your IAM Instance Profile Name
-        String s3JarPath = "s3://your-bucket-name/worker-jar-file.jar"; // Replace with your S3 JAR path
-        String jarFileName = "worker-jar-file.jar";
+        String s3JarPath = "s3://"+bucketName+"/worker.jar"; // Replace with your S3 JAR path
+        String jarFileName = "worker.jar";
         String command = String.format(
             "#!/bin/bash\n" +
             "yum update -y\n" +
