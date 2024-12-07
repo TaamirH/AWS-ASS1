@@ -10,23 +10,44 @@ import software.amazon.awssdk.services.sqs.model.Message;
 
 public class LocalApp {
     public static void main(String[] args) {
+        if (args.length < 3) {
+            System.out.println("Usage: java -jar yourjar.jar inputFileName outputFileName n [terminate]");
+            return;
+        }
+         // Access the arguments
+         String inputFileName = args[0];
+         String outputFileName = args[1];
+         int n;
+         String terminate = "False";
+ 
+         try {
+             n = Integer.parseInt(args[2]);
+         } catch (NumberFormatException e) {
+             System.out.println("Error: 'n' must be an integer.");
+             return;
+         }
+ 
+         // Check for optional 'terminate' argument
+         if (args.length > 3) {
+             terminate = "True";
+         }
         AWS aws = AWS.getInstance();
+
         String appToManagerQueueUrl = aws.createQueue("AppToManagerSQS");
         String ManagerToAppQueueUrl = aws.createQueue("ManagerToAppSQS");
         aws.checkAndStartManager("ami-08902199a8aa0bc09", "Role", "Manager");
         try {
             // Upload a file to S3
-            String inputFileName = "input-sample-3.txt";
             File inputFile = new File("C:\\New folder\\DPL\\ASS1\\AWS-Exp\\" + inputFileName);
             String s3Url = aws.uploadFileToS3(inputFileName, inputFile);
 
             // Send a message to Manager
             String appTag = "LocalApp1 " + inputFileName;
-            String taskMessage = "File uploaded to S3:" + s3Url+"," + "N:100,Terminate:True";
+            String taskMessage = "File uploaded to S3:" + s3Url+"," + "N:"+n+",Terminate:"+terminate+",SQS:"+ManagerToAppQueueUrl;
             aws.sendMessageToQueue(appToManagerQueueUrl, taskMessage, appTag);
 
             System.out.println("Message sent to AppToManagerSQS: " + taskMessage);
-            Thread.sleep(15000);
+            Thread.sleep(10000);
             // Wait for the result message
             System.out.println("Waiting for result message...");
             boolean gotMessage = false;
@@ -50,7 +71,7 @@ public class LocalApp {
                             System.out.println("Result file downloaded: " + resultFile.getAbsolutePath());
 
                             // Generate HTML file from the result file
-                            generateHtmlFile(resultFile, "output.html");
+                            generateHtmlFile(resultFile, outputFileName+".html");
 
                             // Delete the processed message
                             aws.deleteMessageFromQueue(ManagerToAppQueueUrl, message);
